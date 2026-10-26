@@ -1,0 +1,17 @@
+{
+  "verdict": "EMPTY",
+  "manifestCount": 0,
+  "maxManifests": 5000,
+  "rootIds": [],
+  "headIds": [],
+  "findings": {
+    "dangling": [],
+    "forks": [],
+    "cycles": [],
+    "columnDrift": [],
+    "timeInversions": [],
+    "unproven": [],
+    "unreadable": []
+  },
+  "checkedAt": "2026-11-01T10:00:00.000Z"
+}

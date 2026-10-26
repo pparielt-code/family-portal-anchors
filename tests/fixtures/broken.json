@@ -1,0 +1,17 @@
+{
+  "verdict": "BROKEN",
+  "manifestCount": 3,
+  "maxManifests": 5000,
+  "rootIds": ["m-001", "m-009"],
+  "headIds": ["m-002", "m-009"],
+  "findings": {
+    "dangling": [{ "manifestId": "m-003", "previousManifestId": "m-777" }],
+    "forks": [],
+    "cycles": [],
+    "columnDrift": [],
+    "timeInversions": [],
+    "unproven": [],
+    "unreadable": []
+  },
+  "checkedAt": "2026-11-01T10:00:00.000Z"
+}

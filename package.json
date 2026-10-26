@@ -1,0 +1,12 @@
+{
+  "name": "family-portal-anchors",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "External anchor for the family-portal manifest chain (append-only, ADR-013 step 2)",
+  "scripts": {
+    "test": "node --test tests/anchor-tools.test.mjs",
+    "record": "node tools/record-anchor.mjs",
+    "verify": "node tools/verify-anchor.mjs"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "verdict": "COHERENT",
+  "manifestCount": 2,
+  "maxManifests": 5000,
+  "rootIds": ["m-001"],
+  "headIds": ["m-002"],
+  "findings": {
+    "dangling": [],
+    "forks": [],
+    "cycles": [],
+    "columnDrift": [],
+    "timeInversions": [],
+    "unproven": [],
+    "unreadable": []
+  },
+  "checkedAt": "2026-11-01T10:00:00.000Z"
+}
