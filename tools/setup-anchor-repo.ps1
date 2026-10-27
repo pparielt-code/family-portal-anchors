@@ -5,7 +5,7 @@
 .DESCRIPTION
     Один запуск делает три вещи, и третья важнее первых двух:
 
-      1. создаёт приватный репозиторий (если его ещё нет);
+      1. создаёт репозиторий (по умолчанию ПУБЛИЧНЫЙ, см. .PARAMETER Visibility);
       2. включает защиту ветки main: запрет force-push, запрет удаления, enforce_admins;
       3. ПРОВЕРЯЕТ защиту отказом пробного force-push. Если пробный force-push прошёл —
          защита не работает, и это не «условно настроено», а провал (exit 1).
@@ -13,13 +13,21 @@
     Почему проверка обязательна: «включил и предположил» — это ровно тот класс ошибки,
     ради которого якорь и заводится. Непроверенная защита ветки не считается защитой.
 
-    Токен: нужен classic-scope `repo` или fine-grained с Administration: Read and write.
-    Текущий fine-grained токен ограничен репозиторием family-portal, поэтому создание
-    нового репозитория им недоступно (403 createRepository). Токен читается из
-    переменной окружения GH_TOKEN и никогда не печатается.
+    Почему публичный по умолчанию: на бесплатном плане GitHub защита веток есть ТОЛЬКО в
+    публичных репозиториях (в приватном — 403 Upgrade to GitHub Pro ...). Проверено 2026-10-27:
+    права токена достаточны (тот же токен меняет настройки репозитория), ограничение тарифное.
+    Раскрывать нечего: запись якоря собирается по белому списку полей и персональных данных
+    не содержит.
+
+    Токен: classic-scope `repo` либо fine-grained с Administration: Read and write + право
+    создавать репозитории. Токен читается из переменной окружения GH_TOKEN и никогда не печатается.
 
 .PARAMETER Repo
     Полное имя репозитория, по умолчанию pparielt-code/family-portal-anchors.
+
+.PARAMETER Visibility
+    public (по умолчанию) или private. При private на бесплатном плане защита не включится —
+    скрипт скажет об этом отдельно (exit 3), а не выдаст общий отказ.
 
 .PARAMETER Remote
     URL для push, по умолчанию SSH-форма git@github.com:<owner>/<repo>.git
@@ -31,7 +39,9 @@
 [CmdletBinding()]
 param(
     [string]$Repo = "pparielt-code/family-portal-anchors",
-    [string]$Branch = "main"
+    [string]$Branch = "main",
+    [ValidateSet("public", "private")]
+    [string]$Visibility = "public"
 )
 
 $ErrorActionPreference = "Stop"
@@ -101,7 +111,7 @@ if ($existing.Ok) {
 } elseif ($existing.Status -eq 404) {
     $created = Invoke-Api -Method POST -Path "/user/repos" -Body @{
         name        = $name
-        private     = $true
+        private     = ($Visibility -eq "private")
         description = "External anchor for the family-portal manifest chain (append-only, ADR-013)"
         auto_init   = $false
     }
@@ -111,7 +121,7 @@ if ($existing.Ok) {
         Write-Host "      Нужен токен с правом создания репозиториев либо репозиторий, созданный вручную."
         exit 2
     }
-    Write-Host "      создан: $($created.Data.full_name)"
+    Write-Host "      создан: $($created.Data.full_name) (visibility $($created.Data.visibility))"
 } else {
     Write-Host "      НЕИЗВЕСТНО: HTTP $($existing.Status) при чтении репозитория" -ForegroundColor Red
     exit 2
@@ -139,23 +149,33 @@ if (-not $applied.Ok) {
         # в ПУБЛИЧНЫХ репозиториях. Дело не в правах токена: тот же токен успешно меняет
         # настройки репозитория (administration:write есть).
         Write-Host ""
-        Write-Host "ПРИЧИНА: тариф, а не токен. Защита веток недоступна в приватном репозитории на" -ForegroundColor Yellow
-        Write-Host "бесплатном плане GitHub. Права токена достаточны (PATCH репозитория проходит)."
+        Write-Host "ПРИЧИНА: тариф, а не токен. Права токена достаточны (PATCH репозитория проходит)."
+        Write-Host "Проверьте видимость репозитория: защита веток на бесплатном плане GitHub есть" -ForegroundColor Yellow
+        Write-Host "только в публичных репозиториях, в приватных — нет."
         Write-Host ""
-        Write-Host "Варианты (решает владелец):"
-        Write-Host "  A. Оставить репозиторий публичным -> защита включается бесплатно."
-        Write-Host "     Запись якоря персональных данных не содержит по построению (белый список полей)."
-        Write-Host "  B. GitHub Pro (~4 USD/мес) -> защита в приватном репозитории."
-        Write-Host "  C. Публичное 'зеркало хэшей': журнал остаётся приватным, публикуются только"
-        Write-Host "     SHA-256 записей. Защита публичного репозитория бесплатна, метаданные не утекают."
+        Write-Host "Что делать:"
+        Write-Host "  A. Сделать репозиторий публичным и повторить запуск:"
+        Write-Host "     GitHub -> Settings -> Danger Zone -> Change visibility -> Change to public."
+        Write-Host "     Запись якоря персональных данных не содержит по построению (белый список полей),"
+        Write-Host "     поэтому публичность ничего не раскрывает, кроме числа и времени импортов."
+        Write-Host "  B. GitHub Pro (~4 USD/мес) -> защита доступна и в приватном репозитории."
         exit 3
     }
     exit 1
 }
 Write-Host "      включена: allow_force_pushes=false, allow_deletions=false, enforce_admins=true"
 
-# --- 3. Проверка защиты отказом force-push ---------------------------------
-Write-Host "[3/3] Проверка защиты: пробный force-push должен быть ОТКЛОНЁН"
+# --- 3. Проверка защиты отказом -------------------------------------------------
+# Проба обязана бить ПО ЗАЩИЩЁННОЙ ВЕТКЕ. Проверка «пуш в другую ветку отклонён» ничего не
+# доказывает: защита настроена на refs/heads/main, а новый ref никто не защищает — такая проба
+# проходит и даёт ложный вывод «защита не работает» (дефект был в первой версии скрипта).
+#
+# Поэтому: пробуем force-push одиночного коммита в main.
+#   - отклонено  -> защита действует (то, что нужно);
+#   - прошло     -> защиты нет; немедленно восстанавливаем main на сохранённый SHA и падаем.
+# Восстановление возможно именно потому, что защиты нет, — то есть успешный путь пробы не
+# оставляет испорченной истории. SHA печатается: даже при сбое восстановления он даёт ручной откат.
+Write-Host "[3/3] Проверка защиты: пробный force-push в $Branch должен быть ОТКЛОНЁН"
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Write-Host "      НЕ ПРОВЕРЕНО: git не найден в PATH" -ForegroundColor Yellow
     exit 2
@@ -173,21 +193,77 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "      remote: $remoteUrl"
 
-# Пустой force-push: отправляем текущий HEAD в пустую ссылку с --force. Если защита работает,
-# сервер откажет (protected branch hook declined). Ничего не теряется: ссылка создаётся пустой.
-$probeRef = "refs/heads/__force_probe_should_fail"
-& git push --force origin "HEAD:$probeRef" 2>&1 | ForEach-Object { Write-Host "      $_" }
-$probeExit = $LASTEXITCODE
+$lsOut = (& git ls-remote origin "refs/heads/$Branch") 2>$null
+if ($LASTEXITCODE -ne 0 -or -not $lsOut) {
+    Write-Host "      НЕ ПРОВЕРЕНО: не удалось прочитать refs/heads/$Branch на origin" -ForegroundColor Yellow
+    Write-Host "      Сначала запушьте содержимое: git push -u origin $Branch"
+    exit 2
+}
+$origSha = ($lsOut -split "\s+")[0]
+Write-Host "      текущий $Branch на origin: $origSha"
 
-if ($probeExit -eq 0) {
+# Одиночный коммит-проба: дерево берём из HEAD, но БЕЗ родителей — им нельзя «дополнить»
+# историю, только перезаписать её, что и должно быть отклонено.
+$probeTree = (& git rev-parse "HEAD^{tree}") 2>$null
+if ($LASTEXITCODE -ne 0 -or -not $probeTree) {
+    Write-Host "      НЕ ПРОВЕРЕНО: не удалось прочитать дерево HEAD" -ForegroundColor Yellow
+    exit 2
+}
+$probeCommit = ("anchor protection probe: must never reach $Branch" | & git -c user.name="anchor-probe" -c user.email="anchor-probe@example.invalid" commit-tree $probeTree) 2>$null
+if ($LASTEXITCODE -ne 0 -or -not $probeCommit) {
+    Write-Host "      НЕ ПРОВЕРЕНО: git commit-tree не отработал" -ForegroundColor Yellow
+    exit 2
+}
+Write-Host "      пробный коммит: $probeCommit"
+
+# Вывод git пишем в файлы и на время вызова снимаем Stop: при $ErrorActionPreference="Stop"
+# stderr внешней команды превращается в исключение, и отказ сервера (то есть УСПЕХ пробы)
+# выглядел бы как падение скрипта.
+$probeOut = [IO.Path]::GetTempFileName()
+$probeErr = [IO.Path]::GetTempFileName()
+$eap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& git push --force origin "$($probeCommit):refs/heads/$Branch" > $probeOut 2> $probeErr
+$probeExit = $LASTEXITCODE
+$ErrorActionPreference = $eap
+foreach ($f in @($probeOut, $probeErr)) {
+    if (Test-Path $f) {
+        Get-Content $f | Where-Object { $_.Trim() } | ForEach-Object { Write-Host "      $_" }
+    }
+}
+Remove-Item $probeOut, $probeErr -ErrorAction SilentlyContinue
+
+if ($probeExit -ne 0) {
     Write-Host ""
-    Write-Host "ПРОВАЛ: force-push прошёл — защита НЕ действует." -ForegroundColor Red
-    Write-Host "Убираю пробную ветку и фиксирую провал."
-    & git push origin --delete "__force_probe_should_fail" 2>&1 | ForEach-Object { Write-Host "      $_" }
-    exit 1
+    Write-Host "ВЕРНО: force-push в $Branch отклонён (exit $probeExit) — защита действует." -ForegroundColor Green
+    Write-Host "Дальше: первая запись якоря (tools/record-anchor.mjs)."
+    exit 0
 }
 
 Write-Host ""
-Write-Host "ВЕРНО: force-push отклонён сервером (exit $probeExit) — защита действует." -ForegroundColor Green
-Write-Host "Дальше: git push -u origin $Branch, затем первая запись якоря."
-exit 0
+Write-Host "ПРОВАЛ: force-push в $Branch ПРОШЁЛ — защиты нет." -ForegroundColor Red
+Write-Host "Восстанавливаю $Branch на $origSha."
+$restoreOut = [IO.Path]::GetTempFileName()
+$restoreErr = [IO.Path]::GetTempFileName()
+$eap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& git push --force origin "$($origSha):refs/heads/$Branch" > $restoreOut 2> $restoreErr
+$restoreExit = $LASTEXITCODE
+$ErrorActionPreference = $eap
+foreach ($f in @($restoreOut, $restoreErr)) {
+    if (Test-Path $f) {
+        Get-Content $f | Where-Object { $_.Trim() } | ForEach-Object { Write-Host "      $_" }
+    }
+}
+Remove-Item $restoreOut, $restoreErr -ErrorAction SilentlyContinue
+
+$nowOut = (& git ls-remote origin "refs/heads/$Branch") 2>$null
+$nowSha = if ($nowOut) { ($nowOut -split "\s+")[0] } else { "" }
+if ($restoreExit -eq 0 -and $nowSha -eq $origSha) {
+    Write-Host "Восстановлено: $Branch снова $origSha. Записи якоря не потеряны." -ForegroundColor Yellow
+    exit 1
+}
+
+Write-Host "ВОССТАНОВИТЬ НЕ УДАЛОСЬ. $Branch сейчас: '$nowSha', нужен $origSha." -ForegroundColor Red
+Write-Host "Откат вручную: git push --force origin '$($origSha):refs/heads/$Branch'"
+exit 2
